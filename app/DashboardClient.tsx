@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Plus, Minus, Trash2, X, Eye, Edit, Check, AlertCircle, ChevronDown, ChevronRight, Search, Upload } from "lucide-react";
+import { Plus, Minus, Trash2, X, Eye, Edit, Check, AlertCircle, ChevronDown, ChevronRight, Search, Upload, Package } from "lucide-react";
 import { addEntries, deleteEntry, updateEntry, addPremiumTopUp, toggleDelivery, bulkAddEntries } from "./actions";
 
 type DashboardEntry = {
@@ -55,6 +55,7 @@ export default function DashboardClient({
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [bulkRawText, setBulkRawText] = useState("");
   const [bulkError, setBulkError] = useState("");
+  const [isProductTotalsOpen, setIsProductTotalsOpen] = useState(false);
 
   const [isPremiumModalOpen, setIsPremiumModalOpen] = useState(false);
   const [premiumAdjustmentMode, setPremiumAdjustmentMode] = useState<"add" | "subtract">("add");
@@ -83,6 +84,21 @@ export default function DashboardClient({
   const totalCredit = entries.reduce((sum, e) => sum + (Number(e.credit) || 0), 0);
   const totalSpent = entries.reduce((sum, e) => sum + (Number(e.spent) || 0), 0);
   const ownMoneySpent = totalSpent + premiumTotal;
+  const productTotals = Array.from(
+    entries.reduce((map, entry) => {
+      const productName = entry.product.trim() || "Unnamed product";
+      const key = productName.toLowerCase();
+      const current = map.get(key) || { product: productName, quantity: 0 };
+      map.set(key, {
+        product: current.product,
+        quantity: current.quantity + (Number(entry.quantity) || 0),
+      });
+      return map;
+    }, new Map<string, { product: string; quantity: number }>()),
+  )
+    .map(([, total]) => total)
+    .sort((a, b) => b.quantity - a.quantity || a.product.localeCompare(b.product));
+  const totalProductQuantity = productTotals.reduce((sum, item) => sum + item.quantity, 0);
 
   // --- Group entries by UUID ---
   const groupsMap = new Map<string, DashboardEntry[]>();
@@ -363,6 +379,35 @@ export default function DashboardClient({
               </button>
             </div>
           </div>
+        </div>
+
+        <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
+          <button
+            onClick={() => setIsProductTotalsOpen((open) => !open)}
+            className="w-full p-5 flex items-center justify-between gap-4 hover:bg-neutral-800/50 transition text-left"
+            aria-expanded={isProductTotalsOpen}
+          >
+            <span className="flex items-center gap-2">
+              {isProductTotalsOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+              <Package size={18} className="text-neutral-400" />
+              <span className="font-bold">Product Totals</span>
+            </span>
+            <span className="text-sm text-neutral-400">
+              {totalProductQuantity} total
+            </span>
+          </button>
+          {isProductTotalsOpen && (
+            <div className="px-5 pb-5 flex flex-wrap gap-2">
+              {productTotals.length ? productTotals.map((item) => (
+                <div key={item.product.toLowerCase()} className="bg-neutral-950 border border-neutral-800 rounded-md px-3 py-2 flex items-center gap-3 min-w-36">
+                  <span className="text-sm text-neutral-300 truncate">{item.product}</span>
+                  <span className="ml-auto font-mono text-sm font-bold">{item.quantity}</span>
+                </div>
+              )) : (
+                <p className="text-sm text-neutral-500">No products yet.</p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="relative max-w-xl">
