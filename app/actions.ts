@@ -22,6 +22,13 @@ type TrackerEntryUpdate = {
   deliveryLink?: string | null;
 };
 
+const BULK_PRODUCT = "1X (ENGLISH) CROWN ZENITH BOOSTER PACK";
+const BULK_DATE = "27/06/2026";
+const BULK_SPENT = 2.63;
+const BULK_CREDIT = 25;
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // Handles saving multiple rows at once from the modal
 export async function addEntries(entries: NewTrackerEntry[]) {
   try {
@@ -49,6 +56,37 @@ export async function addEntries(entries: NewTrackerEntry[]) {
     console.error("Database save error:", error);
     return { success: false, error: "Failed to save to database" };
   }
+}
+
+export async function bulkAddEntries(rawText: string) {
+  const compactText = rawText.replace(/\s+/g, "");
+  const compactProduct = escapeRegExp(BULK_PRODUCT.replace(/\s+/g, ""));
+  const compactDate = escapeRegExp(BULK_DATE);
+  const compactSpent = escapeRegExp(BULK_SPENT.toFixed(2));
+  const pattern = new RegExp(
+    `([0-9a-fA-F-]{36})Y?${compactProduct}${compactDate}${compactSpent}${BULK_CREDIT}`,
+    "g",
+  );
+
+  const entries = Array.from(compactText.matchAll(pattern), ([, uuid]) => ({
+    uuid,
+    product: BULK_PRODUCT,
+    date: BULK_DATE,
+    spent: BULK_SPENT,
+    credit: BULK_CREDIT,
+    cookies: "bulk_imported",
+    quantity: 1,
+    deliveryLink: null,
+    delivered: false,
+  }));
+
+  if (!entries.length) {
+    return { success: false, error: "No matching entries found.", count: 0 };
+  }
+
+  await prisma.trackerEntry.createMany({ data: entries });
+  revalidatePath('/');
+  return { success: true, count: entries.length };
 }
 
 // Deletes a specific row by its unique ID

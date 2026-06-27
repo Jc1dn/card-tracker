@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { Plus, Minus, Trash2, X, Eye, Edit, Check, AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
-import { addEntries, deleteEntry, updateEntry, addPremiumTopUp, toggleDelivery } from "./actions";
+import { Plus, Minus, Trash2, X, Eye, Edit, Check, AlertCircle, ChevronDown, ChevronRight, Search, Upload } from "lucide-react";
+import { addEntries, deleteEntry, updateEntry, addPremiumTopUp, toggleDelivery, bulkAddEntries } from "./actions";
 
 type DashboardEntry = {
   id: string;
@@ -51,6 +51,10 @@ export default function DashboardClient({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [cookieModal, setCookieModal] = useState<string | null>(null);
   const [formError, setFormError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [bulkRawText, setBulkRawText] = useState("");
+  const [bulkError, setBulkError] = useState("");
 
   const [isPremiumModalOpen, setIsPremiumModalOpen] = useState(false);
   const [premiumAdjustmentMode, setPremiumAdjustmentMode] = useState<"add" | "subtract">("add");
@@ -100,6 +104,40 @@ export default function DashboardClient({
     deliveredCount: group.filter((e) => e.delivered).length,
   }));
 
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const searchableText = (parts: Array<string | number | boolean | null | undefined>) =>
+    parts.filter((part) => part !== null && part !== undefined).join(" ").toLowerCase();
+  const entryMatchesSearch = (entry: DashboardEntry) =>
+    searchableText([
+      entry.product,
+      entry.uuid,
+      entry.date,
+      entry.quantity,
+      entry.credit,
+      entry.spent,
+      entry.deliveryLink,
+      entry.delivered ? "delivered" : "pending",
+    ]).includes(normalizedSearchQuery);
+  const groupMatchesSearch = (group: EntryGroup) =>
+    searchableText([
+      group.uuid,
+      group.date,
+      group.totalQty,
+      group.credit,
+      group.spent,
+      `${group.deliveredCount}/${group.group.length}`,
+    ]).includes(normalizedSearchQuery);
+  const filteredGroups = normalizedSearchQuery
+    ? groups.flatMap((group) => {
+      if (groupMatchesSearch(group)) {
+        return [{ ...group, visibleGroup: group.group }];
+      }
+
+      const visibleGroup = group.group.filter(entryMatchesSearch);
+      return visibleGroup.length ? [{ ...group, visibleGroup }] : [];
+    })
+    : groups.map((group) => ({ ...group, visibleGroup: group.group }));
+
   const findCreditHolder = (group: DashboardEntry[]) =>
     group.find(e => Number(e.credit) > 0 || Number(e.spent) > 0) || group[0];
 
@@ -137,6 +175,12 @@ export default function DashboardClient({
     });
   };
 
+  const closeBulkModal = () => {
+    setIsBulkModalOpen(false);
+    setBulkRawText("");
+    setBulkError("");
+  };
+
   const handleSave = async () => {
     if (!formData.cookies.trim() || !formData.uuid.trim()) {
       setFormError("Cookies JSON and UUID are both required before saving.");
@@ -158,6 +202,21 @@ export default function DashboardClient({
     }));
 
     await addEntries(payload);
+    window.location.reload();
+  };
+
+  const handleBulkSave = async () => {
+    if (!bulkRawText.trim()) {
+      setBulkError("Paste the bulk text before importing.");
+      return;
+    }
+
+    const result = await bulkAddEntries(bulkRawText);
+    if (!result.success) {
+      setBulkError(result.error || "Bulk import failed.");
+      return;
+    }
+
     window.location.reload();
   };
 
@@ -260,9 +319,14 @@ export default function DashboardClient({
 
         <div className="flex justify-between items-center">
           <h1 className="text-3xl font-bold">Card Tracker</h1>
-          <button onClick={() => setIsModalOpen(true)} className="bg-white text-black px-4 py-2 rounded-md font-bold flex items-center gap-2">
-            <Plus size={18} /> Add Entry
-          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setIsBulkModalOpen(true)} className="bg-neutral-800 text-white px-4 py-2 rounded-md font-bold flex items-center gap-2 hover:bg-neutral-700 transition">
+              <Upload size={18} /> Bulk Import
+            </button>
+            <button onClick={() => setIsModalOpen(true)} className="bg-white text-black px-4 py-2 rounded-md font-bold flex items-center gap-2">
+              <Plus size={18} /> Add Entry
+            </button>
+          </div>
         </div>
 
         {/* Metrics */}
@@ -301,6 +365,26 @@ export default function DashboardClient({
           </div>
         </div>
 
+        <div className="relative max-w-xl">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+          <input
+            type="search"
+            placeholder="Search UUID, product, delivery, status..."
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            className="w-full bg-neutral-900 border border-neutral-800 rounded-md py-3 pl-10 pr-10 text-sm focus:outline-none focus:border-neutral-600 transition"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white transition"
+              aria-label="Clear search"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
+
         {/* Grouped Table */}
         <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
           <table className="w-full text-left text-sm">
@@ -319,9 +403,11 @@ export default function DashboardClient({
               </tr>
             </thead>
             <tbody>
-              {groups.map((g) => {
-                const isExpanded = expandedKey === g.key;
+              {filteredGroups.map((g) => {
+                const isExpanded = expandedKey === g.key || Boolean(normalizedSearchQuery);
                 const isEditingGroup = editingGroupKey === g.key;
+                const visibleTotalQty = g.visibleGroup.reduce((s, e) => s + (Number(e.quantity) || 0), 0);
+                const visibleDeliveredCount = g.visibleGroup.filter((e) => e.delivered).length;
                 return (
                   <React.Fragment key={g.key}>
                     <tr key={g.key} className="border-b border-neutral-800">
@@ -332,9 +418,9 @@ export default function DashboardClient({
                       </td>
                       <td className="p-4 font-mono text-xs">{g.uuid || "-"}</td>
                       <td className="p-4 text-neutral-400">
-                        {g.group.length} product{g.group.length > 1 ? "s" : ""}
+                        {g.visibleGroup.length} product{g.visibleGroup.length > 1 ? "s" : ""}
                       </td>
-                      <td className="p-4">{g.totalQty}</td>
+                      <td className="p-4">{visibleTotalQty}</td>
                       <td className="p-4">
                         {isEditingGroup ? (
                           <input
@@ -357,7 +443,7 @@ export default function DashboardClient({
                         ) : `£${Number(g.spent).toFixed(2)}`}
                       </td>
                       <td className="p-4 text-neutral-400">
-                        {g.deliveredCount}/{g.group.length}
+                        {visibleDeliveredCount}/{g.visibleGroup.length}
                       </td>
                       <td className="p-4 text-neutral-600">-</td>
                       <td className="p-4">
@@ -388,7 +474,7 @@ export default function DashboardClient({
                       </td>
                     </tr>
 
-                    {isExpanded && g.group.map((entry) => {
+                    {isExpanded && g.visibleGroup.map((entry) => {
                       const isEditingProduct = editingProductId === entry.id;
                       return (
                         <tr key={entry.id} className="border-b border-neutral-800 bg-neutral-950/40">
@@ -473,6 +559,13 @@ export default function DashboardClient({
                   </React.Fragment>
                 );
               })}
+              {!filteredGroups.length && (
+                <tr>
+                  <td className="p-8 text-center text-neutral-500" colSpan={10}>
+                    No entries found.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -539,6 +632,40 @@ export default function DashboardClient({
               </button>
               <button onClick={handleSavePremium} className="w-2/3 bg-white text-black py-3 rounded-lg font-bold hover:bg-neutral-200 transition">
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Import Modal */}
+      {isBulkModalOpen && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-xl w-full max-w-2xl">
+            <div className="flex justify-between mb-4">
+              <h2 className="font-bold">Bulk Import</h2>
+              <button onClick={closeBulkModal}><X size={20} /></button>
+            </div>
+            <textarea
+              placeholder="Paste raw import text"
+              value={bulkRawText}
+              onChange={(event) => {
+                setBulkRawText(event.target.value);
+                setBulkError("");
+              }}
+              className="bg-neutral-950 p-3 rounded w-full min-h-56 border border-neutral-800 focus:outline-none focus:border-neutral-600 transition font-mono text-sm resize-y mb-4"
+            />
+            {bulkError && (
+              <p className="text-red-400 text-xs mb-4 flex items-center gap-1">
+                <AlertCircle size={12} /> {bulkError}
+              </p>
+            )}
+            <div className="flex gap-3">
+              <button onClick={closeBulkModal} className="w-1/3 bg-neutral-800 text-white py-3 rounded-lg font-bold hover:bg-neutral-700 transition">
+                Cancel
+              </button>
+              <button onClick={handleBulkSave} className="w-2/3 bg-white text-black py-3 rounded-lg font-bold hover:bg-neutral-200 transition">
+                Import
               </button>
             </div>
           </div>
