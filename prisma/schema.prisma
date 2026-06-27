@@ -1,0 +1,32 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model TrackerEntry {
+  id           String   @id @default(uuid())
+  date         String
+  product      String
+  quantity     Int
+  credit       Int
+  spent        Float
+  cookies      String
+  uuid         String?  // Add this line
+  deliveryLink String?
+  delivered    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+}
+
+model PremiumCreditLog {
+  id        String   @id @default(uuid())
+  amount    Int
+  createdAt DateTime @default(now())
+}
