@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { Plus, Minus, Trash2, X, Eye, Edit, Check, AlertCircle, ChevronDown, ChevronRight, Search, Upload, Package } from "lucide-react";
-import { addEntries, deleteEntry, updateEntry, addPremiumTopUp, toggleDelivery, bulkAddEntries } from "./actions";
+import { addEntries, deleteEntry, updateEntry, addPremiumTopUp, toggleDelivery, bulkAddEntries, updateSoldStatus } from "./actions";
 
 type DashboardEntry = {
   id: string;
@@ -15,6 +15,8 @@ type DashboardEntry = {
   uuid: string | null;
   deliveryLink: string | null;
   delivered: boolean;
+  sold: boolean;
+  soldFor: number | null;
 };
 
 type EntryGroup = {
@@ -27,6 +29,8 @@ type EntryGroup = {
   cookies: string;
   date: string;
   deliveredCount: number;
+  soldCount: number;
+  soldTotal: number;
 };
 
 type GroupEditForm = {
@@ -84,6 +88,8 @@ export default function DashboardClient({
   const totalCredit = entries.reduce((sum, e) => sum + (Number(e.credit) || 0), 0);
   const totalSpent = entries.reduce((sum, e) => sum + (Number(e.spent) || 0), 0);
   const ownMoneySpent = totalSpent + premiumTotal;
+  const totalSoldRevenue = entries.reduce((sum, e) => sum + (e.sold ? Number(e.soldFor) || 0 : 0), 0);
+  const profit = totalSoldRevenue - ownMoneySpent;
   const productTotals = Array.from(
     entries.reduce((map, entry) => {
       const productName = entry.product.trim() || "Unnamed product";
@@ -118,6 +124,8 @@ export default function DashboardClient({
     cookies: group[0].cookies,
     date: group[0].date,
     deliveredCount: group.filter((e) => e.delivered).length,
+    soldCount: group.filter((e) => e.sold).length,
+    soldTotal: group.reduce((s, e) => s + (e.sold ? Number(e.soldFor) || 0 : 0), 0),
   }));
 
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
@@ -133,6 +141,8 @@ export default function DashboardClient({
       entry.spent,
       entry.deliveryLink,
       entry.delivered ? "delivered" : "pending",
+      entry.sold ? "sold" : "unsold",
+      entry.soldFor,
     ]).includes(normalizedSearchQuery);
   const groupMatchesSearch = (group: EntryGroup) =>
     searchableText([
@@ -142,6 +152,8 @@ export default function DashboardClient({
       group.credit,
       group.spent,
       `${group.deliveredCount}/${group.group.length}`,
+      `${group.soldCount}/${group.group.length}`,
+      group.soldTotal,
     ]).includes(normalizedSearchQuery);
   const filteredGroups = normalizedSearchQuery
     ? groups.flatMap((group) => {
@@ -298,6 +310,31 @@ export default function DashboardClient({
     ));
   };
 
+  const handleToggleSold = async (entry: DashboardEntry) => {
+    if (entry.sold) {
+      if (!confirm(`Mark ${entry.product} as not sold?`)) return;
+      await updateSoldStatus(entry.id, false, null);
+      setEntries(entries.map(e =>
+        e.id === entry.id ? { ...e, sold: false, soldFor: null } : e
+      ));
+      return;
+    }
+
+    const input = prompt(`How much did ${entry.product} sell for?`, entry.soldFor ? String(entry.soldFor) : "");
+    if (input === null) return;
+
+    const soldFor = Number(input);
+    if (!Number.isFinite(soldFor) || soldFor < 0) {
+      alert("Enter a valid sold amount.");
+      return;
+    }
+
+    await updateSoldStatus(entry.id, true, soldFor);
+    setEntries(entries.map(e =>
+      e.id === entry.id ? { ...e, sold: true, soldFor } : e
+    ));
+  };
+
   // --- Delete ---
   const deleteGroup = async (g: EntryGroup) => {
     if (!confirm(`Delete this account and all ${g.group.length} product(s) under it?`)) return;
@@ -346,7 +383,7 @@ export default function DashboardClient({
         </div>
 
         {/* Metrics */}
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-4 gap-6">
           <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-xl">
             <p className="text-neutral-400 text-sm">Total Credit</p>
             <p className="text-3xl font-bold mt-2">{totalCredit}</p>
@@ -354,6 +391,12 @@ export default function DashboardClient({
           <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-xl">
             <p className="text-neutral-400 text-sm">Own Money Spent</p>
             <p className="text-3xl font-bold mt-2">£{ownMoneySpent.toFixed(2)}</p>
+          </div>
+          <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-xl">
+            <p className="text-neutral-400 text-sm">Profit</p>
+            <p className={`text-3xl font-bold mt-2 ${profit < 0 ? "text-red-400" : "text-green-400"}`}>
+              £{profit.toFixed(2)}
+            </p>
           </div>
           <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-xl flex items-center justify-between">
             <div>
@@ -442,6 +485,7 @@ export default function DashboardClient({
                 <th className="p-4">Credit</th>
                 <th className="p-4">Spent</th>
                 <th className="p-4">Delivered</th>
+                <th className="p-4">Sold</th>
                 <th className="p-4">Delivery</th>
                 <th className="p-4">Account</th>
                 <th className="p-4 text-right">Actions</th>
@@ -453,6 +497,8 @@ export default function DashboardClient({
                 const isEditingGroup = editingGroupKey === g.key;
                 const visibleTotalQty = g.visibleGroup.reduce((s, e) => s + (Number(e.quantity) || 0), 0);
                 const visibleDeliveredCount = g.visibleGroup.filter((e) => e.delivered).length;
+                const visibleSoldCount = g.visibleGroup.filter((e) => e.sold).length;
+                const visibleSoldTotal = g.visibleGroup.reduce((s, e) => s + (e.sold ? Number(e.soldFor) || 0 : 0), 0);
                 return (
                   <React.Fragment key={g.key}>
                     <tr key={g.key} className="border-b border-neutral-800">
@@ -489,6 +535,10 @@ export default function DashboardClient({
                       </td>
                       <td className="p-4 text-neutral-400">
                         {visibleDeliveredCount}/{g.visibleGroup.length}
+                      </td>
+                      <td className="p-4 text-neutral-400">
+                        {visibleSoldCount}/{g.visibleGroup.length}
+                        {visibleSoldTotal > 0 ? ` (£${visibleSoldTotal.toFixed(2)})` : ""}
                       </td>
                       <td className="p-4 text-neutral-600">-</td>
                       <td className="p-4">
@@ -554,6 +604,22 @@ export default function DashboardClient({
                               aria-label={`Mark ${entry.product} delivered`}
                             />
                           </td>
+                          <td className="p-3">
+                            <label className="inline-flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={entry.sold}
+                                onChange={() => handleToggleSold(entry)}
+                                className="h-4 w-4 accent-white"
+                                aria-label={`Mark ${entry.product} sold`}
+                              />
+                              {entry.sold && (
+                                <span className="text-xs text-green-400 whitespace-nowrap">
+                                  £{Number(entry.soldFor || 0).toFixed(2)}
+                                </span>
+                              )}
+                            </label>
+                          </td>
                           <td className="p-3 max-w-48">
                             {isEditingProduct ? (
                               <input
@@ -606,7 +672,7 @@ export default function DashboardClient({
               })}
               {!filteredGroups.length && (
                 <tr>
-                  <td className="p-8 text-center text-neutral-500" colSpan={10}>
+                  <td className="p-8 text-center text-neutral-500" colSpan={11}>
                     No entries found.
                   </td>
                 </tr>

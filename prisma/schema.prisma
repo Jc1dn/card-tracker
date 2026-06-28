@@ -22,6 +22,8 @@ model TrackerEntry {
   uuid         String?  // Add this line
   deliveryLink String?
   delivered    Boolean  @default(false)
+  sold         Boolean  @default(false)
+  soldFor      Float?
   createdAt    DateTime @default(now())
 }
 

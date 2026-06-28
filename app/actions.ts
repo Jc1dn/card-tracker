@@ -46,6 +46,8 @@ export async function addEntries(entries: NewTrackerEntry[]) {
         uuid: e.uuid?.trim() || null,
         deliveryLink: e.deliveryLink || null,
         delivered: false,
+        sold: false,
+        soldFor: null,
       })),
     });
 
@@ -78,6 +80,8 @@ export async function bulkAddEntries(rawText: string) {
     quantity: 1,
     deliveryLink: null,
     delivered: false,
+    sold: false,
+    soldFor: null,
   }));
 
   if (!entries.length) {
@@ -115,6 +119,23 @@ export async function toggleDelivery(id: string, currentStatus: boolean) {
   } catch (error) {
     console.error("Toggle error:", error);
     return { success: false, error: "Failed to update status" };
+  }
+}
+
+export async function updateSoldStatus(id: string, sold: boolean, soldFor: number | null) {
+  try {
+    await prisma.trackerEntry.update({
+      where: { id },
+      data: {
+        sold,
+        soldFor: sold ? soldFor : null,
+      },
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error) {
+    console.error("Sold update error:", error);
+    return { success: false, error: "Failed to update sold status" };
   }
 }
 
